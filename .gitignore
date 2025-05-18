@@ -1,0 +1,23 @@
+# Node modules
+node_modules/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Variáveis de ambiente
+.env
+
+# Diretórios temporários
+tmp/
+temp/
+
+# Cache
+.cache/
+.vscode/
+.DS_Store
+
+# Build (se você gerar arquivos com TypeScript ou bundlers)
+dist/
+build/
