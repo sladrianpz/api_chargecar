@@ -10,8 +10,8 @@ const { body, validationResult } = require('express-validator');
 const app = express();
 
 // Configuração do banco de dados MySQL
-const sequelize = new Sequelize('ChargeCar', 'root', 'T3co18**', {
-  host: 'localhost',
+const sequelize = new Sequelize('ChargeCar', 'b4ZPQeqCgfPqTVW.root', 'VtYlEFlUmIwyc0Rp**', {
+  host: 'gateway01.us-west-2.prod.aws.tidbcloud.com',
   dialect: 'mysql',
 });
 
