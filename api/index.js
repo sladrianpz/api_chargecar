@@ -160,7 +160,7 @@ async function startServer() {
     // Sincronizar modelos. Cuidado com 'force: true' em produção!
     // { alter: true } é geralmente seguro para desenvolvimento/staging.
     // Para produção, considere usar migrações.
-    await sequelize.sync({ alter: true }); 
+    await sequelize.sync({ force: true });   
     console.log('Modelos sincronizados com o banco de dados.');
 
     app.listen(port, () => {
