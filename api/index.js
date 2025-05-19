@@ -1,91 +1,55 @@
-require('dotenv').config();  // Para carregar as variáveis de ambiente
+require('dotenv').config(); // Para carregar as variáveis de ambiente (apenas uma vez)
 const express = require('express');
-const cors = require('cors');  // Importando o CORS
+const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { Sequelize, DataTypes } = require('sequelize');
+const { Sequelize, DataTypes } = require('sequelize'); // Importa Sequelize e DataTypes aqui
 const { body, validationResult } = require('express-validator');
 
 // Criando o servidor Express
 const app = express();
 
-require('dotenv').config();
-const { Sequelize } = require('sequelize');
-
+// --- Configuração do Sequelize e Conexão ---
 const sequelize = new Sequelize(process.env.DATABASE_URL, {
   dialect: 'mysql',
-  // NÃO adicione 'dialectOptions.ssl' aqui se a DATABASE_URL já cuida disso.
-  // Se você adicionar, ele pode sobrescrever ou conflitar.
   logging: console.log, // Mantenha para depuração por enquanto
+  // dialectOptions: { // Descomente e configure se a DATABASE_URL sozinha não for suficiente para SSL
+  //   ssl: {
+  //     require: true,
+  //     rejectUnauthorized: true
+  //   }
+  // }
 });
 
-sequelize.authenticate()
-  .then(() => {
-    console.log('CONECTADO AO TIDB CLOUD (MySQL Protocol) COM SUCESSO!');
-  })
-  .catch(err => {
-    console.error('ERRO AO CONECTAR AO TIDB CLOUD (TENTATIVA COM URL):', err);
-  });
-
-module.exports = sequelize;
-// Testar a conexão com o banco de dados
-sequelize.authenticate()
-  .then(() => console.log('Conectado ao MySQL'))
-  .catch(err => console.error('Erro ao conectar: ' + err));
-
-// Definindo o modelo de Usuário
+// --- Definição dos Modelos ---
+// É bom definir os modelos antes de tentar sincronizar ou autenticar,
+// embora a autenticação funcione sem os modelos definidos.
 const User = sequelize.define('User', {
-  nome: {
-    type: DataTypes.STRING,
-    allowNull: false,
-  },
-  email: {
-    type: DataTypes.STRING,
-    allowNull: false,
-    unique: true,
-  },
-  senha: {
-    type: DataTypes.STRING,
-    allowNull: false,
-  },
-}, {
-  tableName: 'user',
-  timestamps: true,
-  createdAt: 'created_at',
-  updatedAt: 'updated_at',
-});
+  nome: { type: DataTypes.STRING, allowNull: false },
+  email: { type: DataTypes.STRING, allowNull: false, unique: true },
+  senha: { type: DataTypes.STRING, allowNull: false },
+}, { tableName: 'user', timestamps: true, createdAt: 'created_at', updatedAt: 'updated_at' });
 
-// Definindo o modelo de Veículo
 const Veiculo = sequelize.define('Veiculo', {
-  placa: {
-    type: DataTypes.STRING(7),
-    allowNull: false,
-  },
-  cor: {
-    type: DataTypes.STRING(30),
-    allowNull: false,
-  },
-  modelo: {
-    type: DataTypes.STRING(40),
-    allowNull: false,
-  },
-  marca: {
-    type: DataTypes.STRING(40),
-    allowNull: false,
-  },
-  tipo: {
-    type: DataTypes.STRING(50),
-  },
-}, {
-  tableName: 'veiculo',
-  timestamps: true,
-  createdAt: 'created_at',
-  updatedAt: 'updated_at',
-});
+  placa: { type: DataTypes.STRING(7), allowNull: false },
+  cor: { type: DataTypes.STRING(30), allowNull: false },
+  modelo: { type: DataTypes.STRING(40), allowNull: false },
+  marca: { type: DataTypes.STRING(40), allowNull: false },
+  tipo: { type: DataTypes.STRING(50) },
+}, { tableName: 'veiculo', timestamps: true, createdAt: 'created_at', updatedAt: 'updated_at' });
 
 // Relacionamento entre User e Veiculo
 User.hasMany(Veiculo, { foreignKey: 'user_id' });
 Veiculo.belongsTo(User, { foreignKey: 'user_id' });
+
+
+// --- Middlewares do Express ---
+app.use(express.json());
+app.use(cors({
+  origin: 'http://localhost:8081', // Substitua pelo endereço do seu frontend
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
 // Middleware de autenticação JWT
 const authenticateJWT = (req, res, next) => {
@@ -99,17 +63,7 @@ const authenticateJWT = (req, res, next) => {
   });
 };
 
-// Middleware para aceitar JSON
-app.use(express.json());
-
-// Configurar CORS para permitir a origem específica
-app.use(cors({
-  origin: 'http://localhost:8081',  // Substitua pelo endereço do seu frontend
-  methods: ['GET', 'POST'],         // Métodos permitidos
-  allowedHeaders: ['Content-Type', 'Authorization'],  // Cabeçalhos permitidos
-}));
-
-// Rota para cadastro de novos usuários
+// --- Rotas Express ---
 app.post('/register', [
   body('email').isEmail().withMessage('Email inválido'),
   body('senha').isLength({ min: 6 }).withMessage('Senha deve ter pelo menos 6 caracteres'),
@@ -118,25 +72,21 @@ app.post('/register', [
   if (!errors.isEmpty()) {
     return res.status(400).json({ errors: errors.array() });
   }
-
-  const { nome, email, senha } = req.body;
-  
-  // Verificar se o usuário já existe
-  const userExists = await User.findOne({ where: { email } });
-  if (userExists) {
-    return res.status(400).send('Usuário já existe');
+  try {
+    const { nome, email, senha } = req.body;
+    const userExists = await User.findOne({ where: { email } });
+    if (userExists) {
+      return res.status(400).send('Usuário já existe');
+    }
+    const hashedPassword = await bcrypt.hash(senha, 10);
+    await User.create({ nome, email, senha: hashedPassword });
+    res.status(201).send('Usuário cadastrado com sucesso!');
+  } catch (error) {
+    console.error("Erro no registro:", error);
+    res.status(500).send("Erro ao registrar usuário.");
   }
-
-  // Criptografar a senha
-  const hashedPassword = await bcrypt.hash(senha, 10);
-
-  // Criar um novo usuário
-  const user = await User.create({ nome, email, senha: hashedPassword });
-  
-  res.status(201).send('Usuário cadastrado com sucesso!');
 });
 
-// Rota para login e validação de dados
 app.post('/login', [
   body('email').isEmail().withMessage('Email inválido'),
   body('senha').isLength({ min: 6 }).withMessage('Senha inválida'),
@@ -145,27 +95,24 @@ app.post('/login', [
   if (!errors.isEmpty()) {
     return res.status(400).json({ errors: errors.array() });
   }
-
-  const { email, senha } = req.body;
-  
-  // Buscar usuário no banco de dados
-  const user = await User.findOne({ where: { email } });
-  if (!user) {
-    return res.status(400).send('Usuário não encontrado');
+  try {
+    const { email, senha } = req.body;
+    const user = await User.findOne({ where: { email } });
+    if (!user) {
+      return res.status(400).send('Usuário não encontrado');
+    }
+    const validPassword = await bcrypt.compare(senha, user.senha);
+    if (!validPassword) {
+      return res.status(400).send('Senha incorreta');
+    }
+    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    res.send({ message: 'Login bem-sucedido!', token });
+  } catch (error) {
+    console.error("Erro no login:", error);
+    res.status(500).send("Erro ao fazer login.");
   }
-
-  // Validar a senha
-  const validPassword = await bcrypt.compare(senha, user.senha);
-  if (!validPassword) {
-    return res.status(400).send('Senha incorreta');
-  }
-
-  // Gerar token JWT
-  const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
-  res.send({ message: 'Login bem-sucedido!', token });
 });
 
-// Rota para adicionar veículos (exemplo de funcionalidade autenticada)
 app.post('/add-vehicle', authenticateJWT, [
   body('placa').isLength({ min: 7, max: 7 }).withMessage('Placa inválida'),
   body('modelo').not().isEmpty().withMessage('Modelo é obrigatório'),
@@ -176,31 +123,47 @@ app.post('/add-vehicle', authenticateJWT, [
   if (!errors.isEmpty()) {
     return res.status(400).json({ errors: errors.array() });
   }
-
-  const { placa, modelo, marca, cor } = req.body;
-
-  // Verificar se o veículo já existe
-  const vehicleExists = await Veiculo.findOne({ where: { placa } });
-  if (vehicleExists) {
-    return res.status(400).send('Veículo já cadastrado');
+  try {
+    const { placa, modelo, marca, cor } = req.body;
+    const vehicleExists = await Veiculo.findOne({ where: { placa } });
+    if (vehicleExists) {
+      return res.status(400).send('Veículo já cadastrado');
+    }
+    await Veiculo.create({ placa, modelo, marca, cor, user_id: req.user.userId });
+    res.status(201).send('Veículo cadastrado com sucesso');
+  } catch (error) {
+    console.error("Erro ao adicionar veículo:", error);
+    res.status(500).send("Erro ao adicionar veículo.");
   }
-
-  // Criar novo veículo
-  const veiculo = await Veiculo.create({
-    placa, modelo, marca, cor, user_id: req.user.userId
-  });
-  
-  res.status(201).send('Veículo cadastrado com sucesso');
 });
 
-// Gerenciamento de erros
+// Gerenciamento de erros Express (deve ser um dos últimos middlewares)
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error("Erro não tratado na rota:", err.stack);
   res.status(500).json({ error: 'Algo deu errado!' });
 });
 
-// Iniciar o servidor
-const port = process.env.PORT ||3000;
-app.listen(port, () => {
-  console.log(`Servidor rodando em http://localhost:${port}`);
-});
+// --- Inicialização do Servidor e Sincronização com DB ---
+const port = process.env.PORT || 3000;
+
+async function startServer() {
+  try {
+    await sequelize.authenticate(); // Testar a conexão
+    console.log('CONECTADO AO TIDB CLOUD (MySQL Protocol) COM SUCESSO!');
+
+    // Sincronizar modelos. Cuidado com 'force: true' em produção!
+    // { alter: true } é geralmente seguro para desenvolvimento/staging.
+    // Para produção, considere usar migrações.
+    await sequelize.sync({ alter: true }); 
+    console.log('Modelos sincronizados com o banco de dados.');
+
+    app.listen(port, () => {
+      console.log(`Servidor rodando na porta ${port}`);
+    });
+  } catch (err) {
+    console.error('ERRO AO INICIAR O SERVIDOR OU CONECTAR/SINCRONIZAR COM O DB:', err);
+    process.exit(1); // Saia se houver um erro crítico na inicialização
+  }
+}
+
+startServer();
