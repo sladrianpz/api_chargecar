@@ -9,17 +9,14 @@ const { body, validationResult } = require('express-validator');
 // Criando o servidor Express
 const app = express();
 
+require('dotenv').config();
+const { Sequelize } = require('sequelize');
+
 const sequelize = new Sequelize(process.env.DATABASE_URL, {
   dialect: 'mysql',
-  // Tente sem esta seção 'dialectOptions.ssl' primeiro
-  // dialectOptions: {
-  //   ssl: {
-  //     // Se a URL com sslmode não funcionar, você pode reintroduzir isto
-  //     // require: true,
-  //     // rejectUnauthorized: true // IMPORTANTE que seja true
-  //   }
-  // },
-  logging: console.log, // Mantenha para depuração
+  // NÃO adicione 'dialectOptions.ssl' aqui se a DATABASE_URL já cuida disso.
+  // Se você adicionar, ele pode sobrescrever ou conflitar.
+  logging: console.log, // Mantenha para depuração por enquanto
 });
 
 sequelize.authenticate()
@@ -27,8 +24,7 @@ sequelize.authenticate()
     console.log('CONECTADO AO TIDB CLOUD (MySQL Protocol) COM SUCESSO!');
   })
   .catch(err => {
-    console.error('ERRO AO CONECTAR AO TIDB CLOUD:', err);
-    // Se você ainda tiver problemas, a mensagem de erro aqui será vital
+    console.error('ERRO AO CONECTAR AO TIDB CLOUD (TENTATIVA COM URL):', err);
   });
 
 module.exports = sequelize;
