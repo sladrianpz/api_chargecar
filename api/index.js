@@ -9,12 +9,29 @@ const { body, validationResult } = require('express-validator');
 // Criando o servidor Express
 const app = express();
 
-// Configuração do banco de dados MySQL
-const sequelize = new Sequelize('ChargeCar', 'b4ZPQeqCgfPqTVW.root', 'VtYlEFlUmIwyc0Rp**', {
-  host: 'gateway01.us-west-2.prod.aws.tidbcloud.com',
+const sequelize = new Sequelize(process.env.DATABASE_URL, {
   dialect: 'mysql',
+  // Tente sem esta seção 'dialectOptions.ssl' primeiro
+  // dialectOptions: {
+  //   ssl: {
+  //     // Se a URL com sslmode não funcionar, você pode reintroduzir isto
+  //     // require: true,
+  //     // rejectUnauthorized: true // IMPORTANTE que seja true
+  //   }
+  // },
+  logging: console.log, // Mantenha para depuração
 });
 
+sequelize.authenticate()
+  .then(() => {
+    console.log('CONECTADO AO TIDB CLOUD (MySQL Protocol) COM SUCESSO!');
+  })
+  .catch(err => {
+    console.error('ERRO AO CONECTAR AO TIDB CLOUD:', err);
+    // Se você ainda tiver problemas, a mensagem de erro aqui será vital
+  });
+
+module.exports = sequelize;
 // Testar a conexão com o banco de dados
 sequelize.authenticate()
   .then(() => console.log('Conectado ao MySQL'))
@@ -187,7 +204,7 @@ app.use((err, req, res, next) => {
 });
 
 // Iniciar o servidor
-const port = 3000;
+const port = process.env.PORT ||3000;
 app.listen(port, () => {
   console.log(`Servidor rodando em http://localhost:${port}`);
 });
