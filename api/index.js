@@ -13,12 +13,18 @@ const app = express();
 const sequelize = new Sequelize(process.env.DATABASE_URL, {
   dialect: 'mysql',
   logging: console.log, // Mantenha para depuração por enquanto
-  // dialectOptions: { // Descomente e configure se a DATABASE_URL sozinha não for suficiente para SSL
-  //   ssl: {
-  //     require: true,
-  //     rejectUnauthorized: true
-  //   }
-  // }
+  dialectOptions: {     // DESCOMENTE ESTA LINHA E AS SEGUINTES
+    ssl: {
+      require: true,
+      rejectUnauthorized: true
+      // Se, APÓS esta alteração, você receber um erro de certificado
+      // (como UNABLE_TO_VERIFY_LEAF_SIGNATURE), você precisará adicionar
+      // a opção 'ca' aqui, apontando para o arquivo CA do TiDB Cloud
+      // que você terá que adicionar como um Secret File no Render.
+      // Ex: ca: fs.readFileSync('/etc/secrets/NOME_DO_SEU_ARQUIVO_CA').toString()
+      // E também adicionar: const fs = require('fs'); no topo do arquivo.
+    }
+  }                   
 });
 
 // --- Definição dos Modelos ---
