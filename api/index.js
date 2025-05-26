@@ -19,12 +19,37 @@ const sequelize = new Sequelize(process.env.DATABASE_URL, {
   }
 });
 
-// Modelos (sem alterações aqui)
-const User = sequelize.define('User', { /* ... */ }, { tableName: 'user', timestamps: true, createdAt: 'created_at', updatedAt: 'updated_at' });
-const Veiculo = sequelize.define('Veiculo', { /* ... */ }, { tableName: 'veiculo', timestamps: true, createdAt: 'created_at', updatedAt: 'updated_at' });
+// --- Definições Completas dos Modelos ---
+const User = sequelize.define('User', {
+  nome: { type: DataTypes.STRING, allowNull: false },
+  email: { type: DataTypes.STRING, allowNull: false, unique: true },
+  senha: { type: DataTypes.STRING, allowNull: false },
+}, { tableName: 'user', timestamps: true, createdAt: 'created_at', updatedAt: 'updated_at' });
+
+const Veiculo = sequelize.define('Veiculo', {
+  placa: { type: DataTypes.STRING(7), allowNull: false, unique: true },
+  cor: { type: DataTypes.STRING(30), allowNull: false },
+  modelo: { type: DataTypes.STRING(40), allowNull: false },
+  marca: { type: DataTypes.STRING(40), allowNull: false },
+  tipo: { type: DataTypes.STRING(50) },
+  // user_id é adicionado pela associação
+}, { tableName: 'veiculo', timestamps: true, createdAt: 'created_at', updatedAt: 'updated_at' });
+
+// Associação User -> Veiculo
 User.hasMany(Veiculo, { foreignKey: 'user_id', allowNull: false });
 Veiculo.belongsTo(User, { foreignKey: 'user_id', allowNull: false });
-const Vaga = sequelize.define('Vaga', { /* ... */ }, { tableName: 'vaga', timestamps: true, createdAt: 'created_at', updatedAt: 'updated_at' });
+
+const Vaga = sequelize.define('Vaga', {
+  nome: { type: DataTypes.STRING, allowNull: false, unique: true },
+  ocupada: { type: DataTypes.BOOLEAN, defaultValue: false },
+  placa: { type: DataTypes.STRING(7), allowNull: true },
+  // user_id_reserva: { // Se você decidir adicionar isso no futuro
+  //   type: DataTypes.INTEGER,
+  //   allowNull: true,
+  //   references: { model: User, key: 'id' }
+  // }
+}, { tableName: 'vaga', timestamps: true, createdAt: 'created_at', updatedAt: 'updated_at' });
+// --- Fim das Definições dos Modelos ---
 
 
 // Middlewares
@@ -37,13 +62,13 @@ if (process.env.FRONTEND_URL) {
 
 app.use(cors({
   origin: function (origin, callback) {
-    console.log("[CORS] Checando origem:", origin); // Log para depurar CORS
-    if (!origin || allowedOrigins.includes(origin)) { // Usar includes para mais robustez
+    console.log("[CORS] Checando origem:", origin);
+    if (!origin || allowedOrigins.includes(origin)) {
       console.log("[CORS] Origem permitida:", origin);
       callback(null, true);
     } else {
       console.error("[CORS] Origem BLOQUEADA:", origin);
-      callback(new Error(`A origem ${origin} não é permitida por CORS.`)); // Mensagem de erro mais clara
+      callback(new Error(`A origem ${origin} não é permitida por CORS.`));
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -51,122 +76,41 @@ app.use(cors({
   credentials: true,
 }));
 
-// Middleware JWT (sem alterações aqui)
-const authenticateJWT = (req, res, next) => { /* ... */ };
-
+const authenticateJWT = (req, res, next) => {
+  const authHeader = req.header('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ message: 'Acesso negado. Token não fornecido ou mal formatado.' });
+  }
+  const token = authHeader.replace('Bearer ', '');
+  jwt.verify(token, process.env.JWT_SECRET, (err, decodedToken) => {
+    if (err) {
+      if (err.name === 'TokenExpiredError') return res.status(401).json({ message: 'Token expirado.' });
+      return res.status(403).json({ message: 'Token inválido.' });
+    }
+    req.user = decodedToken;
+    next();
+  });
+};
 
 // --- ROTAS ---
+app.post('/register', [ /* ... Sua lógica de registro ... */ ], async (req, res) => { /* ... */ });
+app.post('/login', [ /* ... Sua lógica de login ... */ ], async (req, res) => { /* ... */ });
+app.post('/add-vehicle', authenticateJWT, [ /* ... Sua lógica de add-vehicle ... */ ], async (req, res) => { /* ... */ });
+app.get('/api/my-vehicles', authenticateJWT, async (req, res) => { /* ... Sua lógica de my-vehicles ... */ });
 
-// Rotas de /register, /login, /add-vehicle, /api/my-vehicles, /api/vagas (GET)
-// (Mantidas como na sua última versão, sem alterações aqui para focar na rota de reserva)
-// ...
-// Registro de usuário
-app.post('/register', [
-  body('nome').not().isEmpty().trim().withMessage('Nome é obrigatório.'),
-  body('email').isEmail().normalizeEmail().withMessage('Email inválido.'),
-  body('senha').isLength({ min: 6 }).withMessage('Senha deve ter pelo menos 6 caracteres.'),
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
-  try {
-    const { nome, email, senha } = req.body;
-    const userExists = await User.findOne({ where: { email } });
-    if (userExists) return res.status(409).json({ message: 'Este e-mail já está cadastrado.' });
-
-    const hashedPassword = await bcrypt.hash(senha, 10);
-    const newUser = await User.create({ nome, email, senha: hashedPassword });
-    res.status(201).json({ message: 'Usuário cadastrado com sucesso!', userId: newUser.id });
-  } catch (error) {
-    console.error("Erro no registro:", error);
-    res.status(500).json({ message: "Erro interno ao registrar usuário." });
-  }
-});
-
-// Login
-app.post('/login', [
-  body('email').isEmail().normalizeEmail().withMessage('Email inválido.'),
-  body('senha').not().isEmpty().withMessage('Senha é obrigatória.'),
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
-  try {
-    const { email, senha } = req.body;
-    const user = await User.findOne({ where: { email } });
-    if (!user) return res.status(401).json({ message: 'Credenciais inválidas.' });
-
-    const validPassword = await bcrypt.compare(senha, user.senha);
-    if (!validPassword) return res.status(401).json({ message: 'Credenciais inválidas.' });
-
-    const token = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
-    res.status(200).json({ message: 'Login bem-sucedido!', token, userId: user.id });
-  } catch (error) {
-    console.error("Erro no login:", error);
-    res.status(500).json({ message: "Erro interno ao fazer login." });
-  }
-});
-
-// Adicionar veículo
-app.post('/add-vehicle', authenticateJWT, [
-  body('placa').trim().toUpperCase().isLength({ min: 7, max: 7 }).withMessage('Placa deve ter 7 caracteres.'),
-  body('modelo').not().isEmpty().trim().withMessage('Modelo é obrigatório.'),
-  body('marca').not().isEmpty().trim().withMessage('Marca é obrigatória.'),
-  body('cor').not().isEmpty().trim().withMessage('Cor é obrigatória.'),
-  body('tipo').optional().trim(),
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
-  try {
-    const { placa, modelo, marca, cor, tipo } = req.body;
-    const userId = req.user.userId;
-
-    const vehicleExistsGlobal = await Veiculo.findOne({ where: { placa } });
-    if (vehicleExistsGlobal) {
-        if (vehicleExistsGlobal.user_id !== userId) {
-            return res.status(409).json({ message: `Veículo com placa ${placa} já cadastrado por outro usuário.` });
-        }
-        return res.status(409).json({ message: `Você já cadastrou o veículo com placa ${placa}.` });
-    }
-
-    const newVehicle = await Veiculo.create({ placa, modelo, marca, cor, tipo: tipo || null, user_id: userId });
-    res.status(201).json({ message: 'Veículo cadastrado com sucesso!', veiculo: newVehicle });
-  } catch (error) {
-    console.error("Erro ao adicionar veículo:", error);
-    if (error.name === 'SequelizeUniqueConstraintError') {
-        return res.status(409).json({ message: `Veículo com placa ${req.body.placa} já existe no sistema.` });
-    }
-    res.status(500).json({ message: "Erro interno ao adicionar veículo." });
-  }
-});
-
-// Listar veículos do usuário logado
-app.get('/api/my-vehicles', authenticateJWT, async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const veiculos = await Veiculo.findAll({ where: { user_id: userId } });
-    res.status(200).json(veiculos); // Retorna array vazio se não tiver veículos, o que é ok
-  } catch (error) {
-    console.error("Erro ao listar veículos do usuário:", error);
-    res.status(500).json({ message: "Erro interno ao buscar seus veículos." });
-  }
-});
-
-
-// Listar vagas
 app.get('/api/vagas', authenticateJWT, async (req, res) => {
   try {
+    console.log(`[API /api/vagas GET] Iniciando. UserID: ${req.user?.userId}`);
     const vagas = await Vaga.findAll({ order: [['nome', 'ASC']] });
+    console.log(`[API /api/vagas GET] Consulta ao banco realizada. Vagas encontradas: ${vagas?.length}`);
     res.status(200).json(vagas);
   } catch (error) {
-    console.error("Erro ao listar vagas:", error);
-    res.status(500).json({ message: "Erro interno ao listar vagas." });
+    console.error(`[API /api/vagas GET] ERRO CAPTURADO AO LISTAR VAGAS:`, error.message);
+    console.error(`[API /api/vagas GET] Stack do erro:`, error.stack);
+    res.status(500).json({ message: "Ocorreu um erro ao buscar as vagas. Tente novamente mais tarde." });
   }
 });
 
-
-// -------- ROTA DE RESERVA MODIFICADA --------
 app.post('/api/vagas/:id/reservar', authenticateJWT, [
   body('placa').trim().toUpperCase().isLength({ min: 7, max: 7 }).withMessage('Placa inválida (deve ter 7 caracteres).'),
 ], async (req, res) => {
@@ -174,109 +118,136 @@ app.post('/api/vagas/:id/reservar', authenticateJWT, [
   if (!errors.isEmpty()) {
     return res.status(400).json({ errors: errors.array() });
   }
-
   try {
-    const vagaId = req.params.id; // ID da vaga que se quer reservar
-    const { placa } = req.body;   // Placa do veículo para a reserva
-    const userIdFromToken = req.user.userId; // ID do usuário fazendo a requisição
-
-    // Log inicial crucial
+    const vagaId = req.params.id;
+    const { placa } = req.body;
+    const userIdFromToken = req.user.userId;
     console.log(`[API /reservar] Tentativa: UserID ${userIdFromToken} | Placa ${placa} | VagaID ${vagaId}`);
     if (!userIdFromToken) {
-        console.error("[API /reservar] ERRO CRÍTICO: userIdFromToken é nulo ou indefinido. Verifique o middleware JWT e a geração do token.");
+        console.error("[API /reservar] ERRO CRÍTICO: userIdFromToken é nulo ou indefinido.");
         return res.status(500).json({ message: "Erro interno: Falha na identificação do usuário." });
     }
-
-    // VALIDAÇÃO 1: A placa pertence ao usuário logado?
-    const veiculoDoUsuario = await Veiculo.findOne({
-      where: {
-        placa: placa,
-        user_id: userIdFromToken
-      },
-    });
-
+    const veiculoDoUsuario = await Veiculo.findOne({ where: { placa: placa, user_id: userIdFromToken } });
     if (!veiculoDoUsuario) {
-      console.log(`[API /reservar] FALHA Val1: Placa ${placa} não pertence ao UserID ${userIdFromToken} ou não está cadastrada para ele.`);
-      // Para dar uma mensagem mais específica, verificamos se a placa existe para outro usuário
+      console.log(`[API /reservar] FALHA Val1: Placa ${placa} não pertence ao UserID ${userIdFromToken} ou não cadastrada.`);
       const veiculoExiste = await Veiculo.findOne({ where: { placa: placa } });
       if (veiculoExiste) {
-        console.log(`[API /reservar] Info Val1: Placa ${placa} existe, mas para user_id ${veiculoExiste.user_id}.`);
         return res.status(403).json({ message: `A placa ${placa} está associada a outro usuário.` });
       }
-      return res.status(404).json({ message: `Veículo com placa ${placa} não encontrado em seus registros. Por favor, cadastre o veículo.` });
+      return res.status(404).json({ message: `Veículo com placa ${placa} não encontrado em seus registros.` });
     }
     console.log(`[API /reservar] SUCESSO Val1: Placa ${placa} pertence ao UserID ${userIdFromToken}.`);
-
-    // VALIDAÇÃO 2: A placa já está em uso em OUTRA vaga ocupada?
-    const outraVagaComMesmaPlaca = await Vaga.findOne({
-      where: {
-        placa: placa,
-        ocupada: true,
-        id: { [Op.ne]: vagaId } // [Op.ne] significa "não é igual a" (not equal)
-      }
-    });
-
+    const outraVagaComMesmaPlaca = await Vaga.findOne({ where: { placa: placa, ocupada: true, id: { [Op.ne]: vagaId } } });
     if (outraVagaComMesmaPlaca) {
-      console.log(`[API /reservar] FALHA Val2: Placa ${placa} já está ocupando a Vaga ${outraVagaComMesmaPlaca.nome} (ID: ${outraVagaComMesmaPlaca.id}).`);
-      return res.status(409).json({ message: `O veículo com placa ${placa} já está utilizando a vaga ${outraVagaComMesmaPlaca.nome}. Não é possível reservar duas vagas com o mesmo veículo.` });
+      console.log(`[API /reservar] FALHA Val2: Placa ${placa} já ocupa Vaga ${outraVagaComMesmaPlaca.nome}.`);
+      return res.status(409).json({ message: `Veículo ${placa} já utiliza a vaga ${outraVagaComMesmaPlaca.nome}.` });
     }
     console.log(`[API /reservar] SUCESSO Val2: Placa ${placa} não está em uso em outra vaga.`);
-
-    // VALIDAÇÃO 3: A vaga alvo (vagaId) existe?
     const vagaAlvo = await Vaga.findByPk(vagaId);
     if (!vagaAlvo) {
-      console.log(`[API /reservar] FALHA Val3: Vaga alvo com ID ${vagaId} não encontrada.`);
       return res.status(404).json({ message: 'A vaga que você tentou reservar não existe.' });
     }
-    console.log(`[API /reservar] SUCESSO Val3: Vaga alvo ${vagaAlvo.nome} (ID: ${vagaId}) encontrada.`);
-
-    // VALIDAÇÃO 4: A vaga alvo já está ocupada?
+    console.log(`[API /reservar] SUCESSO Val3: Vaga alvo ${vagaAlvo.nome} encontrada.`);
     if (vagaAlvo.ocupada) {
-      // Se já estiver ocupada pela MESMA placa, é uma tentativa de re-reserva (geralmente um erro do cliente ou UI)
       if (vagaAlvo.placa === placa) {
-        console.log(`[API /reservar] INFO Val4: Vaga ${vagaAlvo.nome} já está reservada para esta placa ${placa}.`);
-        return res.status(409).json({ message: `A vaga ${vagaAlvo.nome} já está reservada para o veículo ${placa}.` });
+        return res.status(409).json({ message: `Vaga ${vagaAlvo.nome} já está reservada para ${placa}.` });
       }
-      // Se estiver ocupada por OUTRA placa
-      console.log(`[API /reservar] FALHA Val4: Vaga ${vagaAlvo.nome} já está ocupada pela placa ${vagaAlvo.placa}.`);
-      return res.status(400).json({ message: `A vaga ${vagaAlvo.nome} já está ocupada por outro veículo.` });
+      return res.status(400).json({ message: `Vaga ${vagaAlvo.nome} já está ocupada por ${vagaAlvo.placa}.` });
     }
     console.log(`[API /reservar] SUCESSO Val4: Vaga ${vagaAlvo.nome} está disponível.`);
-
-    // Se todas as validações passaram, pode reservar.
     vagaAlvo.ocupada = true;
     vagaAlvo.placa = placa;
     await vagaAlvo.save();
-
-    console.log(`[API /reservar] SUCESSO FINAL: Vaga ${vagaAlvo.nome} reservada para placa ${placa} pelo UserID ${userIdFromToken}.`);
-    res.status(200).json({
-      message: `Vaga ${vagaAlvo.nome} reservada com sucesso para o veículo ${placa}!`,
-      vaga: { // Retorna os detalhes da vaga atualizada para o frontend
-        id: vagaAlvo.id,
-        nome: vagaAlvo.nome,
-        ocupada: vagaAlvo.ocupada,
-        placa: vagaAlvo.placa,
-      },
-    });
-
+    console.log(`[API /reservar] SUCESSO FINAL: Vaga ${vagaAlvo.nome} reservada para ${placa}.`);
+    res.status(200).json({ message: `Vaga ${vagaAlvo.nome} reservada com sucesso para ${placa}!`, vaga: vagaAlvo });
   } catch (error) {
     console.error("[API /reservar] ERRO GERAL NA ROTA:", error);
-    res.status(500).json({ message: 'Erro interno ao tentar processar sua reserva.' });
+    res.status(500).json({ message: 'Erro interno ao processar sua reserva.' });
   }
 });
-// -------- FIM DA ROTA DE RESERVA MODIFICADA --------
+
+app.post('/api/vagas/:id/liberar', authenticateJWT, async (req, res) => { /* ... Sua lógica de liberar vaga ... */ });
+
+// Rota TEMPORÁRIA para resetar vagas para apresentação (REMOVER OU PROTEGER DEPOIS)
+app.post('/api/vagas/reset-para-apresentacao-agora', async (req, res) => {
+  console.warn("[API RESET APRESENTAÇÃO] ROTA DE RESET ACIONADA!");
+  try {
+    const [numberOfAffectedRows] = await Vaga.update(
+      { ocupada: false, placa: null },
+      { where: {} }
+    );
+    const message = `${numberOfAffectedRows} vagas foram resetadas para o estado inicial.`;
+    console.log(message);
+    res.status(200).json({ message });
+  } catch (error) {
+    console.error("[API RESET APRESENTAÇÃO] Erro ao resetar vagas:", error);
+    res.status(500).json({ message: "Erro ao resetar vagas para apresentação." });
+  }
+});
+
+// Middleware de tratamento de erros global
+app.use((err, req, res, next) => {
+  console.error("------------------------------------");
+  console.error("ERRO NÃO TRATADO NA APLICAÇÃO:", err.message);
+  console.error("Rota:", req.method, req.originalUrl);
+  if (err.message.includes("não é permitida por CORS")) { // Tratamento específico para o erro de CORS
+      return res.status(403).json({ message: err.message });
+  }
+  if (err.name === 'UnauthorizedError') {
+    return res.status(401).json({ message: 'Token inválido ou ausente.' });
+  }
+  console.error(err.stack); // Logar o stack completo para outros erros
+  res.status(500).json({ message: 'Ocorreu um erro inesperado no servidor.' });
+});
 
 
-// Rota /api/vagas/:id/liberar (Mantida como na sua última versão)
-app.post('/api/vagas/:id/liberar', authenticateJWT, async (req, res) => { /* ... */ });
-
-
-// Middleware de tratamento de erros global (Mantido como na sua última versão)
-app.use((err, req, res, next) => { /* ... */ });
-
-
-// Start server e createInitialVagas (Mantido como na sua última versão)
 const port = process.env.PORT || 3000;
-async function createInitialVagas() { /* ... */ }
-async function startServer() { /* ... */ }
+
+async function createInitialVagas() {
+  try {
+    const count = await Vaga.count();
+    if (count === 0) {
+      const vagasParaCriar = [];
+      for (let i = 1; i <= 15; i++) {
+        vagasParaCriar.push({ nome: `Vaga ${i}`, ocupada: false });
+      }
+      await Vaga.bulkCreate(vagasParaCriar);
+      console.log('15 vagas iniciais criadas com sucesso.');
+    } else {
+      console.log(`${count} vagas já existem. Nenhuma vaga inicial nova criada.`);
+    }
+  } catch (error) {
+    console.error("Erro ao criar vagas iniciais:", error);
+  }
+}
+
+async function startServer() {
+  try {
+    await sequelize.authenticate();
+    console.log('CONECTADO AO BANCO DE DADOS COM SUCESSO!');
+
+    console.log('Sincronizando modelos com o banco de dados (criando tabelas se não existirem)...');
+    // Usando sync() sem opções para criar tabelas faltantes sem alterar/apagar as existentes.
+    // Para desenvolvimento mais ativo, { alter: true } pode ser útil, mas use com cautela.
+    await sequelize.sync(); // <<--- ALTERAÇÃO AQUI
+    console.log('Modelos sincronizados com o banco de dados.');
+
+    await createInitialVagas();
+
+    // Se você quer resetar as vagas toda vez que a API inicia para a apresentação (controlado por .env):
+    if (process.env.RESET_VAGAS_ON_STARTUP === 'true') {
+        console.warn("[API STARTUP RESET] Resetando todas as vagas para apresentação...");
+        await Vaga.update({ ocupada: false, placa: null }, { where: {} });
+        console.log("[API STARTUP RESET] Vagas resetadas no início.");
+    }
+
+    app.listen(port, () => {
+      console.log(`Servidor rodando na porta ${port} em modo ${process.env.NODE_ENV || 'development'}`);
+    });
+  } catch (err) {
+    console.error('ERRO AO INICIAR SERVIDOR OU CONECTAR/SINCRONIZAR DB:', err);
+    process.exit(1);
+  }
+}
+
 startServer();
