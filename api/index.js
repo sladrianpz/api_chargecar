@@ -1,35 +1,26 @@
-require('dotenv').config(); // Para carregar as variáveis de ambiente (apenas uma vez)
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { Sequelize, DataTypes } = require('sequelize'); // Importa Sequelize e DataTypes aqui
+const { Sequelize, DataTypes } = require('sequelize');
 const { body, validationResult } = require('express-validator');
 
-// Criando o servidor Express
 const app = express();
 
-// --- Configuração do Sequelize e Conexão ---
 const sequelize = new Sequelize(process.env.DATABASE_URL, {
   dialect: 'mysql',
-  logging: console.log, // Mantenha para depuração por enquanto
-  dialectOptions: {     // DESCOMENTE ESTA LINHA E AS SEGUINTES
+  logging: console.log,
+  dialectOptions: {
     ssl: {
       require: true,
-      rejectUnauthorized: true
-      // Se, APÓS esta alteração, você receber um erro de certificado
-      // (como UNABLE_TO_VERIFY_LEAF_SIGNATURE), você precisará adicionar
-      // a opção 'ca' aqui, apontando para o arquivo CA do TiDB Cloud
-      // que você terá que adicionar como um Secret File no Render.
-      // Ex: ca: fs.readFileSync('/etc/secrets/NOME_DO_SEU_ARQUIVO_CA').toString()
-      // E também adicionar: const fs = require('fs'); no topo do arquivo.
+      rejectUnauthorized: true,
     }
-  }                   
+  }
 });
 
-// --- Definição dos Modelos ---
-// É bom definir os modelos antes de tentar sincronizar ou autenticar,
-// embora a autenticação funcione sem os modelos definidos.
+// Modelos
+
 const User = sequelize.define('User', {
   nome: { type: DataTypes.STRING, allowNull: false },
   email: { type: DataTypes.STRING, allowNull: false, unique: true },
@@ -44,20 +35,25 @@ const Veiculo = sequelize.define('Veiculo', {
   tipo: { type: DataTypes.STRING(50) },
 }, { tableName: 'veiculo', timestamps: true, createdAt: 'created_at', updatedAt: 'updated_at' });
 
-// Relacionamento entre User e Veiculo
 User.hasMany(Veiculo, { foreignKey: 'user_id' });
 Veiculo.belongsTo(User, { foreignKey: 'user_id' });
 
+// Modelo para vagas de carregamento
+const Vaga = sequelize.define('Vaga', {
+  nome: { type: DataTypes.STRING, allowNull: false },          // Ex: "Vaga 1"
+  ocupada: { type: DataTypes.BOOLEAN, defaultValue: false },   // Status da vaga
+  placa: { type: DataTypes.STRING(7), allowNull: true },       // Placa do veículo que reservou
+}, { tableName: 'vaga', timestamps: true, createdAt: 'created_at', updatedAt: 'updated_at' });
 
-// --- Middlewares do Express ---
+// Middlewares
 app.use(express.json());
 app.use(cors({
-  origin: 'http://localhost:8081', // Substitua pelo endereço do seu frontend
+  origin: 'http://localhost:8081',
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// Middleware de autenticação JWT
+// Middleware JWT
 const authenticateJWT = (req, res, next) => {
   const token = req.header('Authorization')?.replace('Bearer ', '');
   if (!token) return res.status(401).send('Acesso negado');
@@ -69,21 +65,21 @@ const authenticateJWT = (req, res, next) => {
   });
 };
 
-// --- Rotas Express ---
+// Rotas
+
+// Registro de usuário
 app.post('/register', [
   body('email').isEmail().withMessage('Email inválido'),
   body('senha').isLength({ min: 6 }).withMessage('Senha deve ter pelo menos 6 caracteres'),
 ], async (req, res) => {
   const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
   try {
     const { nome, email, senha } = req.body;
     const userExists = await User.findOne({ where: { email } });
-    if (userExists) {
-      return res.status(400).send('Usuário já existe');
-    }
+    if (userExists) return res.status(400).send('Usuário já existe');
+
     const hashedPassword = await bcrypt.hash(senha, 10);
     await User.create({ nome, email, senha: hashedPassword });
     res.status(201).send('Usuário cadastrado com sucesso!');
@@ -93,24 +89,22 @@ app.post('/register', [
   }
 });
 
+// Login
 app.post('/login', [
   body('email').isEmail().withMessage('Email inválido'),
   body('senha').isLength({ min: 6 }).withMessage('Senha inválida'),
 ], async (req, res) => {
   const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
   try {
     const { email, senha } = req.body;
     const user = await User.findOne({ where: { email } });
-    if (!user) {
-      return res.status(400).send('Usuário não encontrado');
-    }
+    if (!user) return res.status(400).send('Usuário não encontrado');
+
     const validPassword = await bcrypt.compare(senha, user.senha);
-    if (!validPassword) {
-      return res.status(400).send('Senha incorreta');
-    }
+    if (!validPassword) return res.status(400).send('Senha incorreta');
+
     const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
     res.send({ message: 'Login bem-sucedido!', token });
   } catch (error) {
@@ -119,6 +113,7 @@ app.post('/login', [
   }
 });
 
+// Adicionar veículo
 app.post('/add-vehicle', authenticateJWT, [
   body('placa').isLength({ min: 7, max: 7 }).withMessage('Placa inválida'),
   body('modelo').not().isEmpty().withMessage('Modelo é obrigatório'),
@@ -126,15 +121,13 @@ app.post('/add-vehicle', authenticateJWT, [
   body('cor').not().isEmpty().withMessage('Cor é obrigatória'),
 ], async (req, res) => {
   const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
   try {
     const { placa, modelo, marca, cor } = req.body;
     const vehicleExists = await Veiculo.findOne({ where: { placa } });
-    if (vehicleExists) {
-      return res.status(400).send('Veículo já cadastrado');
-    }
+    if (vehicleExists) return res.status(400).send('Veículo já cadastrado');
+
     await Veiculo.create({ placa, modelo, marca, cor, user_id: req.user.userId });
     res.status(201).send('Veículo cadastrado com sucesso');
   } catch (error) {
@@ -143,32 +136,77 @@ app.post('/add-vehicle', authenticateJWT, [
   }
 });
 
-// Gerenciamento de erros Express (deve ser um dos últimos middlewares)
+// Listar vagas (após login)
+app.get('/api/vagas', authenticateJWT, async (req, res) => {
+  try {
+    const vagas = await Vaga.findAll();
+    res.json(vagas);
+  } catch (error) {
+    console.error("Erro ao listar vagas:", error);
+    res.status(500).send("Erro ao listar vagas");
+  }
+});
+
+// Reservar vaga por id
+app.post('/api/vagas/:id/reservar', authenticateJWT, [
+  body('placa').isLength({ min: 7, max: 7 }).withMessage('Placa inválida'),
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+  try {
+    const vaga = await Vaga.findByPk(req.params.id);
+    if (!vaga) return res.status(404).send("Vaga não encontrada");
+    if (vaga.ocupada) return res.status(400).send("Vaga já reservada");
+
+    const { placa } = req.body;
+
+    vaga.ocupada = true;
+    vaga.placa = placa.toUpperCase();
+    await vaga.save();
+
+    res.json(vaga);
+  } catch (error) {
+    console.error("Erro ao reservar vaga:", error);
+    res.status(500).send("Erro ao reservar vaga");
+  }
+});
+
+// Middleware de erros (último middleware)
 app.use((err, req, res, next) => {
   console.error("Erro não tratado na rota:", err.stack);
   res.status(500).json({ error: 'Algo deu errado!' });
 });
 
-// --- Inicialização do Servidor e Sincronização com DB ---
 const port = process.env.PORT || 3000;
+
+// Função para criar as vagas iniciais (15 vagas)
+async function createInitialVagas() {
+  const count = await Vaga.count();
+  if (count === 0) {
+    for (let i = 1; i <= 15; i++) {
+      await Vaga.create({ nome: `Vaga ${i}`, ocupada: false });
+    }
+    console.log('Vagas iniciais criadas');
+  }
+}
 
 async function startServer() {
   try {
-    await sequelize.authenticate(); // Testar a conexão
-    console.log('CONECTADO AO TIDB CLOUD (MySQL Protocol) COM SUCESSO!');
+    await sequelize.authenticate();
+    console.log('CONECTADO AO BANCO COM SUCESSO!');
 
-    // Sincronizar modelos. Cuidado com 'force: true' em produção!
-    // { alter: true } é geralmente seguro para desenvolvimento/staging.
-    // Para produção, considere usar migrações.
     await sequelize.sync();
-    console.log('Modelos sincronizados com o banco de dados.');
+    console.log('Modelos sincronizados.');
+
+    await createInitialVagas();
 
     app.listen(port, () => {
       console.log(`Servidor rodando na porta ${port}`);
     });
   } catch (err) {
-    console.error('ERRO AO INICIAR O SERVIDOR OU CONECTAR/SINCRONIZAR COM O DB:', err);
-    process.exit(1); // Saia se houver um erro crítico na inicialização
+    console.error('Erro ao iniciar servidor ou conectar/sincronizar DB:', err);
+    process.exit(1);
   }
 }
 
